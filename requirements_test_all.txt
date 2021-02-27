@@ -823,6 +823,9 @@ pymodbus==2.3.0
 # homeassistant.components.monoprice
 pymonoprice==0.3
 
+# homeassistant.components.yamaha_musiccast
+pymusiccast==0.1.6
+
 # homeassistant.components.myq
 pymyq==3.0.4
 
