@@ -25,6 +25,11 @@
       }
     }
   },
+  "exceptions": {
+    "group_join_failed": {
+      "message": "Failed to join {entity_id} to the group."
+    }
+  },
   "entity": {
     "media_player": {
       "zone": {

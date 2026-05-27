@@ -72,6 +72,22 @@ async def async_setup_entry(
     async_add_entities(media_players)
 
 
+async def _async_browse_media_sources(hass: HomeAssistant) -> BrowseMedia | None:
+    """Browse the available audio media sources.
+
+    Returns ``None`` when no media sources are available, since
+    ``media_source.async_browse_media`` raises ``BrowseError`` in that case and
+    the device's own content should still be browsable.
+    """
+    with contextlib.suppress(BrowseError):
+        return await media_source.async_browse_media(
+            hass,
+            None,
+            content_filter=lambda item: item.media_content_type.startswith("audio/"),
+        )
+    return None
+
+
 class MusicCastMediaPlayer(MusicCastDeviceEntity, MediaPlayerEntity):
     """The musiccast media player."""
 
@@ -370,21 +386,16 @@ class MusicCastMediaPlayer(MusicCastDeviceEntity, MediaPlayerEntity):
             for child in media_content_provider.children
         ]
 
-        if add_media_source:
-            # pylint: disable-next=home-assistant-action-swallowed-exception
-            with contextlib.suppress(BrowseError):
-                item = await media_source.async_browse_media(
-                    self.hass,
-                    None,
-                    content_filter=lambda item: item.media_content_type.startswith(
-                        "audio/"
-                    ),
-                )
-                # If domain is None, it's overview of available sources
-                if item.domain is None:
-                    children.extend(item.children)
-                else:
-                    children.append(item)
+        if (
+            add_media_source
+            and (media_sources := await _async_browse_media_sources(self.hass))
+            is not None
+        ):
+            # If domain is None, it's overview of available sources
+            if media_sources.domain is None:
+                children.extend(media_sources.children)
+            else:
+                children.append(media_sources)
 
         return BrowseMedia(
             title=media_content_provider.title,
@@ -753,16 +764,21 @@ class MusicCastMediaPlayer(MusicCastDeviceEntity, MediaPlayerEntity):
             if client != self:
                 try:
                     network_join = await client.async_client_join(group, self)
-                # pylint: disable-next=home-assistant-action-swallowed-exception
                 except MusicCastGroupException:
-                    _LOGGER.warning(
-                        (
-                            "%s is struggling to update its group data. Will retry"
-                            " perform the update"
-                        ),
+                    # The device sometimes fails to update its group data on the
+                    # first attempt, so retry once before surfacing the error.
+                    _LOGGER.debug(
+                        "%s failed to update its group data, retrying",
                         client.entity_id,
                     )
-                    network_join = await client.async_client_join(group, self)
+                    try:
+                        network_join = await client.async_client_join(group, self)
+                    except MusicCastGroupException as err:
+                        raise HomeAssistantError(
+                            translation_domain=DOMAIN,
+                            translation_key="group_join_failed",
+                            translation_placeholders={"entity_id": client.entity_id},
+                        ) from err
 
                 if network_join:
                     ip_addresses.add(client.ip_address)
